@@ -49,8 +49,8 @@ export interface ExtractionPipelineOptions {
     apiKey?: string;
 
     /** 
-     * Model to use (default: "gemini-2.0-flash").
-     * Gemini 2.0 Flash is recommended for speed and efficiency in extraction.
+     * Model to use (default: "gemini-2.5-flash").
+     * Gemini 2.5 Flash is recommended for speed and efficiency in extraction.
      */
     model?: string;
 
@@ -94,7 +94,7 @@ export class ExtractionPipeline {
         }
 
         this.google = createGoogleGenerativeAI({ apiKey });
-        this.model = options.model || "gemini-2.0-flash";
+        this.model = options.model || "gemini-2.5-flash";
         this.temperature = options.temperature ?? 0.1;
         this.onProgress = options.onProgress;
     }
