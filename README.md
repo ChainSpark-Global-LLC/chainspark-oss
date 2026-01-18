@@ -6,7 +6,10 @@ Welcome to the **Chainspark Open-Source Hub**. This repository is a curated coll
 
 This repository is organized into three main areas:
 
-- **[patterns/](./patterns/)**: Complete, runnable modules implementing specific architecture patterns (e.g., resilient extraction).
+- **[patterns/](./patterns/)**: Complete, runnable modules implementing specific architecture patterns (e.g.,
+    - **Resilient AI Extraction**: A production-ready pipeline for page-by-page extraction from large documents. Features high-concurrency rate limiting, result streaming, and robust error handling.
+        - [Explore Pattern](patterns/resilient-extraction/README.md)
+        - [Latency Optimization Guide](patterns/resilient-extraction/docs/patterns/latency-optimization.md)
 - **[snippets/](./snippets/)**: Bite-sized code utility fragments and prompt engineering tricks.
 - **[examples/](./patterns/resilient-extraction/examples/)**: Minimal demos to help you get started quickly.
 

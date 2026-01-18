@@ -209,6 +209,16 @@ export interface RateLimitConfig {
      * @default 3
      */
     maxRetries: number;
+
+    /**
+     * Maximum number of concurrent requests.
+     * 
+     * Use this to process multiple pages in parallel while still
+     * respecting the `delayMs` per "slot".
+     * 
+     * @default 1
+     */
+    maxConcurrent: number;
 }
 
 /**
@@ -221,6 +231,8 @@ export const DEFAULT_RATE_LIMIT: RateLimitConfig = {
     delayMs: 7000,
     // 3 retries with exponential backoff covers ~2 minutes of throttling
     maxRetries: 3,
+    // Default to sequential for backward compatibility
+    maxConcurrent: 1,
 };
 
 // ============================================================================
