@@ -156,8 +156,11 @@ export interface RateLimiterMetrics {
  * ```
  */
 export class RateLimiter {
-    /** Timestamp of the last API call (used to calculate wait time) */
-    private lastCallTime: number = 0;
+    /** Timestamp of the when the next available slot is */
+    private nextSlotTime: number = 0;
+
+    /** Semaphore-like counter for concurrency */
+    private inFlightCount: number = 0;
 
     /** Configuration for delays and retries */
     private config: RateLimitConfig;
@@ -213,21 +216,24 @@ export class RateLimiter {
      */
     async waitForNextSlot(): Promise<number> {
         const now = Date.now();
-        const elapsed = now - this.lastCallTime;
-        const remaining = this.config.delayMs - elapsed;
 
-        if (remaining > 0) {
-            // Use logger instead of direct console
+        // Calculate when this request can start
+        // It must be at least delayMs after the PREVIOUSLY scheduled slot
+        const scheduledTime = Math.max(now, this.nextSlotTime);
+        this.nextSlotTime = scheduledTime + this.config.delayMs;
+
+        const waitTime = scheduledTime - now;
+
+        if (waitTime > 0) {
             logger.info(
-                `Rate limiting: waiting ${remaining}ms before next request`,
-                { elapsed, remaining, delayMs: this.config.delayMs }
+                `Rate limiting: waiting ${waitTime}ms for next available slot`,
+                { waitTime, delayMs: this.config.delayMs }
             );
-            await sleep(remaining);
-            this.metrics.totalWaitTimeMs += remaining;
+            await sleep(waitTime);
+            this.metrics.totalWaitTimeMs += waitTime;
         }
 
-        this.lastCallTime = Date.now();
-        return Math.max(0, remaining);
+        return Math.max(0, waitTime);
     }
 
     /**
@@ -274,17 +280,26 @@ export class RateLimiter {
         let lastError: Error | null = null;
 
         for (let attempt = 1; attempt <= this.config.maxRetries; attempt++) {
-            await this.waitForNextSlot();
+            // Wait for concurrency slot if we're at the limit
+            while (this.inFlightCount >= this.config.maxConcurrent) {
+                await sleep(50); // Poll for availability
+            }
+
+            // Reserve the slot BEFORE waiting for the time slot
+            this.inFlightCount++;
 
             try {
+                await this.waitForNextSlot();
                 const result = await fn();
 
                 // Success! Update metrics
+                this.inFlightCount--;
                 this.metrics.totalExecutions++;
                 this.metrics.lastExecutionAt = Date.now();
 
                 return result;
             } catch (error) {
+                this.inFlightCount--;
                 lastError = error instanceof Error ? error : new Error(String(error));
 
                 // Check if it's a rate limit error (429)

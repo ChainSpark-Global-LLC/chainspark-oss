@@ -44,6 +44,11 @@ Practical guide on defining your own Zod schemas and prompt builders to extract 
 Explains how to use the framework's error system to build resilient applications that can differentiate between rate limits, missing keys, and validation failures.
 *   **Concepts**: `ExtractionError`, `ErrorCode`, `RateLimitError`.
 
+### [05: Latency Optimization](./05-latency-optimization.ts)
+**Pattern**: Parallel and Streaming Extraction
+Explores techniques for reducing latency, including parallel processing of pages and streaming partial results.
+*   **Concepts**: `extractFromPages` (with concurrency), `onChunk`.
+
 ---
 
 ## Best Practices Shown in These Examples

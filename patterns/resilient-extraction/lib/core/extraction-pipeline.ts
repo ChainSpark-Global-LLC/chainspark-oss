@@ -186,9 +186,6 @@ export class ExtractionPipeline {
                 allItems.push(...items);
                 logger.info(`Page extraction successful`, { pageNum, itemCount: items.length });
             } catch (error) {
-                // Pattern: Error Isolation
-                // We log the error but allow the overall process to continue.
-                // The final response will detail which pages failed.
                 const exError = wrapError(error);
                 logger.error(`Page extraction failed`, {
                     pageNum,
@@ -206,32 +203,10 @@ export class ExtractionPipeline {
             }
         }
 
-        // Pattern: Cross-Page Deduplication
-        // When splitting documents, some items might span across page boundaries
-        // or be repeated (e.g., headers/footers). This step ensures global uniqueness.
-        const itemsBeforeDedup = allItems.length;
+        // Aggregate and Deduplicate
         allItems = this.deduplicateItems(allItems);
-
         const processingTimeMs = Date.now() - startTime;
         const pagesFailed = pageResults.filter((r) => !r.success).length;
-
-        logger.info(`Extraction complete`, {
-            uniqueItemCount: allItems.length,
-            itemsBeforeDedup,
-            pagesProcessed: chunks.length,
-            pagesFailed,
-            durationMs: processingTimeMs
-        });
-
-        // Calculate quality metrics (average confidence)
-        let averageConfidence: number | undefined;
-        if (allItems.length > 0 && typeof (allItems[0] as any).confidence === "number") {
-            const totalConfidence = allItems.reduce(
-                (sum, item) => sum + ((item as any).confidence || 0),
-                0
-            );
-            averageConfidence = totalConfidence / allItems.length;
-        }
 
         return {
             items: allItems,
@@ -240,20 +215,139 @@ export class ExtractionPipeline {
             pageResults,
             metrics: {
                 totalItems: allItems.length,
-                itemsBeforeDedup,
+                itemsBeforeDedup: pageResults.reduce((sum, r) => sum + r.items.length, 0),
                 processingTimeMs,
-                averageConfidence,
+                averageConfidence: this.calculateAverageConfidence(allItems),
             },
         };
+    }
+
+    /**
+     * Optimized: Parallel Page Extraction
+     * 
+     * Processes all pages concurrently. The total duration is limited by
+     * the LLM's RPM and the slowest single page.
+     */
+    async extractParallel<T extends ZodTypeAny>(
+        chunks: PageChunk[],
+        extractor: ExtractorConfig<T>
+    ): Promise<ExtractionResult<z.infer<T>>> {
+        const startTime = Date.now();
+        const config = { ...DEFAULT_RATE_LIMIT, ...extractor.rateLimit };
+        const rateLimiter = new RateLimiter(config);
+
+        logger.info(`Starting parallel extraction`, {
+            pageCount: chunks.length,
+            extractor: extractor.name,
+            maxConcurrent: config.maxConcurrent
+        });
+
+        const tasks = chunks.map(async (chunk, i) => {
+            const pageNum = chunk.pageNumber;
+            try {
+                this.onProgress?.(i + 1, chunks.length, `Processing page ${pageNum}`);
+                const items = await rateLimiter.execute(
+                    () => this.extractSingle(chunk.content, extractor),
+                    `Page ${pageNum} extraction`
+                );
+                return { items, pageNumber: pageNum, success: true } as PageExtractionResult<z.infer<T>>;
+            } catch (error) {
+                const exError = wrapError(error);
+                return {
+                    items: [],
+                    pageNumber: pageNum,
+                    success: false,
+                    error: exError.message,
+                    errorCode: exError.code
+                } as PageExtractionResult<z.infer<T>>;
+            }
+        });
+
+        const pageResults = await Promise.all(tasks);
+        let allItems: z.infer<T>[] = [];
+        for (const res of pageResults) {
+            allItems.push(...res.items);
+        }
+
+        const itemsBeforeDedup = allItems.length;
+        allItems = this.deduplicateItems(allItems);
+        const processingTimeMs = Date.now() - startTime;
+
+        return {
+            items: allItems,
+            pagesProcessed: chunks.length,
+            pagesFailed: pageResults.filter((r) => !r.success).length,
+            pageResults,
+            metrics: {
+                totalItems: allItems.length,
+                itemsBeforeDedup,
+                processingTimeMs,
+                averageConfidence: this.calculateAverageConfidence(allItems),
+            },
+        };
+    }
+
+    /**
+     * Pattern: Result Streaming
+     * 
+     * Returns an AsyncGenerator that yields results as soon as they are 
+     * available from the LLM.
+     */
+    async *extractStreaming<T extends ZodTypeAny>(
+        chunks: PageChunk[],
+        extractor: ExtractorConfig<T>
+    ): AsyncGenerator<PageExtractionResult<z.infer<T>>> {
+        const config = { ...DEFAULT_RATE_LIMIT, ...extractor.rateLimit };
+        const rateLimiter = new RateLimiter(config);
+
+        // Wrap each promise to also return its own identity for removal
+        const tasks = chunks.map(async (chunk) => {
+            const pageNum = chunk.pageNumber;
+            try {
+                const items = await rateLimiter.execute(
+                    () => this.extractSingle(chunk.content, extractor),
+                    `Page ${pageNum} extraction`
+                );
+                return { items, pageNumber: pageNum, success: true } as PageExtractionResult<z.infer<T>>;
+            } catch (error) {
+                const exError = wrapError(error);
+                return {
+                    items: [],
+                    pageNumber: pageNum,
+                    success: false,
+                    error: exError.message,
+                    errorCode: exError.code
+                } as PageExtractionResult<z.infer<T>>;
+            }
+        });
+
+        const pool = new Set(tasks);
+        while (pool.size > 0) {
+            // Promise.race returns the value of the first resolved promise
+            // We need to find which promise resolved to remove it from the pool.
+            const finished = await Promise.race(
+                Array.from(pool).map(p => p.then(res => ({ res, p })))
+            );
+            yield finished.res;
+            pool.delete(finished.p);
+        }
+    }
+
+    private calculateAverageConfidence(items: any[]): number | undefined {
+        if (items.length > 0 && typeof items[0].confidence === "number") {
+            const totalConfidence = items.reduce(
+                (sum, item) => sum + (item.confidence || 0),
+                0
+            );
+            return totalConfidence / items.length;
+        }
+        return undefined;
     }
 
     /**
      * Helper: Global Content Deduplication
      * 
      * Uses a heuristic to identify duplicate items across different pages.
-     * Priority:
-     * 1. If an item has a `description` field, we use its normalized text.
-     * 2. If not, we use the full JSON string representation.
      */
     private deduplicateItems<T>(items: T[]): T[] {
         const seen = new Set<string>();
