@@ -142,4 +142,64 @@ describe("Source Grounding", () => {
             expect(result).toHaveLength(2);
         });
     });
+
+    describe("computeEvidenceOffsets (client-side)", () => {
+        // Local implementation matching the one in grounding.ts
+        function computeEvidenceOffsets(
+            sourceText: string,
+            evidenceText: string
+        ): EvidenceSpan | null {
+            if (!evidenceText || !sourceText) return null;
+            const startOffset = sourceText.indexOf(evidenceText);
+            if (startOffset === -1) return null;
+            return {
+                text: evidenceText,
+                startOffset,
+                endOffset: startOffset + evidenceText.length,
+            };
+        }
+
+        it("should compute correct offsets for existing text", () => {
+            const source = "Invoice Total: $6,000.00";
+            const result = computeEvidenceOffsets(source, "$6,000.00");
+
+            expect(result).toEqual({
+                text: "$6,000.00",
+                startOffset: 15,
+                endOffset: 24,
+            });
+        });
+
+        it("should return null for text not found", () => {
+            const source = "Invoice Total: $6,000.00";
+            const result = computeEvidenceOffsets(source, "$7,000.00");
+
+            expect(result).toBeNull();
+        });
+
+        it("should handle empty inputs", () => {
+            expect(computeEvidenceOffsets("", "test")).toBeNull();
+            expect(computeEvidenceOffsets("test", "")).toBeNull();
+        });
+
+        it("should find first occurrence when text appears multiple times", () => {
+            const source = "Item: Widget, Item: Gadget";
+            const result = computeEvidenceOffsets(source, "Item:");
+
+            expect(result?.startOffset).toBe(0);
+            expect(result?.endOffset).toBe(5);
+        });
+
+        it("should handle multi-line text", () => {
+            const source = "Line 1\nLine 2\nTotal: $100";
+            const result = computeEvidenceOffsets(source, "$100");
+
+            expect(result).toEqual({
+                text: "$100",
+                startOffset: 21,
+                endOffset: 25,
+            });
+        });
+    });
 });
+

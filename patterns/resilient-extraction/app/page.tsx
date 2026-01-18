@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import { GroundingViewer } from "./components/grounding-viewer";
 
 // Sample data for each extractor type
 const SAMPLE_DATA: Record<string, string> = {
@@ -83,17 +84,68 @@ Benefits:
 - Home office stipend`,
 };
 
+interface RawEvidenceSpan {
+    text: string;
+}
+
+interface EvidenceSpan {
+    text: string;
+    startOffset: number;
+    endOffset: number;
+}
+
+/**
+ * Compute offsets for an evidence span using string matching.
+ * This is more reliable than asking the LLM to compute offsets.
+ */
+function computeEvidenceOffsets(
+    sourceText: string,
+    evidenceText: string
+): EvidenceSpan | null {
+    if (!evidenceText) return null;
+    const startOffset = sourceText.indexOf(evidenceText);
+    if (startOffset === -1) return null;
+    return {
+        text: evidenceText,
+        startOffset,
+        endOffset: startOffset + evidenceText.length,
+    };
+}
+
+interface ExtractedItem {
+    description?: string;
+    total?: number;
+    confidence?: number;
+    evidence?: {
+        descriptionSpan?: RawEvidenceSpan;
+        totalSpan?: RawEvidenceSpan;
+    };
+    [key: string]: unknown;
+}
+
+interface ExtractionResult {
+    items: ExtractedItem[];
+    metrics?: {
+        totalItems: number;
+        processingTimeMs: number;
+        averageConfidence?: number;
+    };
+}
+
 export default function DemoPage() {
     const [extractorType, setExtractorType] = useState("invoice");
     const [inputText, setInputText] = useState(SAMPLE_DATA.invoice);
-    const [result, setResult] = useState<object | null>(null);
+    const [result, setResult] = useState<ExtractionResult | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [selectedItemIndex, setSelectedItemIndex] = useState<number | null>(null);
+    const [viewMode, setViewMode] = useState<"json" | "grounding">("grounding");
 
     const handleExtract = async () => {
         setLoading(true);
         setError(null);
         setResult(null);
+        setSelectedItemIndex(null);
 
         try {
             const response = await fetch(`/api/extract/${extractorType}`, {
@@ -109,6 +161,10 @@ export default function DemoPage() {
             }
 
             setResult(data);
+            // Auto-select first item if available
+            if (data.items?.length > 0) {
+                setSelectedItemIndex(0);
+            }
         } catch (err) {
             setError(err instanceof Error ? err.message : "Unknown error");
         } finally {
@@ -121,23 +177,77 @@ export default function DemoPage() {
         setInputText(SAMPLE_DATA[type] || "");
         setResult(null);
         setError(null);
+        setSelectedItemIndex(null);
     };
+
+    // Build highlights from extracted items
+    const highlights = useMemo(() => {
+        if (!result?.items) return [];
+
+        const colors = ["yellow", "green", "blue", "red"];
+        const allHighlights: Array<{
+            id: string;
+            span: EvidenceSpan;
+            color: string;
+            label: string;
+        }> = [];
+
+        result.items.forEach((item, index) => {
+            const color = colors[index % colors.length];
+            const evidence = item.evidence;
+
+            // Compute offsets client-side from evidence text
+            if (evidence?.descriptionSpan?.text) {
+                const span = computeEvidenceOffsets(inputText, evidence.descriptionSpan.text);
+                if (span) {
+                    allHighlights.push({
+                        id: `item-${index}-desc`,
+                        span,
+                        color,
+                        label: `Item ${index + 1}: ${item.description || "Description"}`,
+                    });
+                }
+            }
+
+            if (evidence?.totalSpan?.text) {
+                const span = computeEvidenceOffsets(inputText, evidence.totalSpan.text);
+                if (span) {
+                    allHighlights.push({
+                        id: `item-${index}-total`,
+                        span,
+                        color,
+                        label: `Item ${index + 1}: $${item.total}`,
+                    });
+                }
+            }
+        });
+
+        return allHighlights;
+    }, [result]);
+
+    // Filter highlights for selected item only
+    const selectedHighlights = useMemo(() => {
+        if (selectedItemIndex === null) return highlights;
+        return highlights.filter((h) => h.id.startsWith(`item-${selectedItemIndex}-`));
+    }, [highlights, selectedItemIndex]);
+
+    const hasGrounding = result?.items?.some((item) => item.evidence);
 
     return (
         <main className="min-h-screen bg-gray-50 py-8 px-4">
-            <div className="max-w-6xl mx-auto">
+            <div className="max-w-7xl mx-auto">
                 {/* Header */}
                 <div className="text-center mb-8">
                     <h1 className="text-3xl font-bold text-gray-900 mb-2">
                         AI Extraction Patterns
                     </h1>
                     <p className="text-gray-600">
-                        Resilient, structured data extraction from unstructured text
+                        Resilient, structured data extraction with source grounding
                     </p>
                 </div>
 
-                {/* Main Grid */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Main Grid - 3 columns when grounding is available */}
+                <div className={`grid gap-6 ${result && hasGrounding ? "grid-cols-1 lg:grid-cols-3" : "grid-cols-1 lg:grid-cols-2"}`}>
                     {/* Input Panel */}
                     <div className="bg-white rounded-lg shadow-sm border p-6">
                         <div className="mb-4">
@@ -162,7 +272,7 @@ export default function DemoPage() {
                             <textarea
                                 value={inputText}
                                 onChange={(e) => setInputText(e.target.value)}
-                                rows={16}
+                                rows={14}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                 placeholder="Paste your text here..."
                             />
@@ -187,11 +297,29 @@ export default function DemoPage() {
                         </button>
                     </div>
 
-                    {/* Output Panel */}
+                    {/* Extracted Items Panel */}
                     <div className="bg-white rounded-lg shadow-sm border p-6">
-                        <h2 className="text-sm font-medium text-gray-700 mb-4">
-                            Extraction Result
-                        </h2>
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-sm font-medium text-gray-700">
+                                Extracted Items
+                            </h2>
+                            {result && (
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => setViewMode("grounding")}
+                                        className={`px-3 py-1 text-xs rounded-md ${viewMode === "grounding" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}
+                                    >
+                                        Grounding
+                                    </button>
+                                    <button
+                                        onClick={() => setViewMode("json")}
+                                        className={`px-3 py-1 text-xs rounded-md ${viewMode === "json" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}
+                                    >
+                                        JSON
+                                    </button>
+                                </div>
+                            )}
+                        </div>
 
                         {error && (
                             <div className="bg-red-50 border border-red-200 rounded-md p-4 text-red-700 text-sm">
@@ -208,29 +336,105 @@ export default function DemoPage() {
                         {result && (
                             <div className="space-y-4">
                                 {/* Metrics */}
-                                {"metrics" in result && (
-                                    <div className="flex gap-4 text-sm">
+                                {result.metrics && (
+                                    <div className="flex flex-wrap gap-2 text-sm">
                                         <div className="bg-green-50 text-green-700 px-3 py-1 rounded-full">
-                                            {(result as any).metrics.totalItems} items
+                                            {result.metrics.totalItems} items
                                         </div>
                                         <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full">
-                                            {((result as any).metrics.processingTimeMs / 1000).toFixed(1)}s
+                                            {(result.metrics.processingTimeMs / 1000).toFixed(1)}s
                                         </div>
-                                        {(result as any).metrics.averageConfidence && (
+                                        {result.metrics.averageConfidence && (
                                             <div className="bg-purple-50 text-purple-700 px-3 py-1 rounded-full">
-                                                {Math.round((result as any).metrics.averageConfidence * 100)}% confidence
+                                                {Math.round(result.metrics.averageConfidence * 100)}% confidence
+                                            </div>
+                                        )}
+                                        {hasGrounding && (
+                                            <div className="bg-yellow-50 text-yellow-700 px-3 py-1 rounded-full">
+                                                ✓ Grounded
                                             </div>
                                         )}
                                     </div>
                                 )}
 
-                                {/* JSON Result */}
-                                <pre className="bg-gray-900 text-gray-100 rounded-md p-4 overflow-auto max-h-[500px] text-sm">
-                                    {JSON.stringify(result, null, 2)}
-                                </pre>
+                                {viewMode === "json" ? (
+                                    <pre className="bg-gray-900 text-gray-100 rounded-md p-4 overflow-auto max-h-[400px] text-sm">
+                                        {JSON.stringify(result, null, 2)}
+                                    </pre>
+                                ) : (
+                                    <div className="space-y-2 max-h-[400px] overflow-auto">
+                                        {result.items.map((item, index) => (
+                                            <div
+                                                key={index}
+                                                onClick={() => setSelectedItemIndex(index)}
+                                                className={`p-3 rounded-md border cursor-pointer transition-colors ${selectedItemIndex === index
+                                                    ? "border-blue-500 bg-blue-50"
+                                                    : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                                                    }`}
+                                            >
+                                                <div className="flex justify-between items-start">
+                                                    <span className="font-medium text-sm text-gray-900 truncate flex-1">
+                                                        {item.description || `Item ${index + 1}`}
+                                                    </span>
+                                                    {item.total !== undefined && (
+                                                        <span className="text-sm font-mono text-green-600 ml-2">
+                                                            ${item.total.toLocaleString()}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                {item.confidence !== undefined && (
+                                                    <div className="mt-1 flex items-center gap-2">
+                                                        <div className="flex-1 h-1 bg-gray-200 rounded-full overflow-hidden">
+                                                            <div
+                                                                className="h-full bg-blue-500 rounded-full"
+                                                                style={{ width: `${item.confidence * 100}%` }}
+                                                            />
+                                                        </div>
+                                                        <span className="text-xs text-gray-500">
+                                                            {Math.round(item.confidence * 100)}%
+                                                        </span>
+                                                    </div>
+                                                )}
+                                                {item.evidence && (
+                                                    <div className="mt-1 text-xs text-yellow-600">
+                                                        📍 Has source grounding
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
+
+                    {/* Grounding Viewer Panel - Only show when results have grounding */}
+                    {result && hasGrounding && (
+                        <div className="bg-white rounded-lg shadow-sm border p-6">
+                            <h2 className="text-sm font-medium text-gray-700 mb-4">
+                                Source Grounding
+                                {selectedItemIndex !== null && (
+                                    <span className="ml-2 text-blue-600">
+                                        (Item {selectedItemIndex + 1} selected)
+                                    </span>
+                                )}
+                            </h2>
+                            <p className="text-xs text-gray-500 mb-4">
+                                Highlighted text shows where extracted values came from. Click an item on the left to filter.
+                            </p>
+                            <GroundingViewer
+                                sourceText={inputText}
+                                highlights={selectedHighlights}
+                                selectedId={selectedItemIndex !== null ? `item-${selectedItemIndex}-desc` : undefined}
+                                onHighlightClick={(id) => {
+                                    const match = id.match(/item-(\d+)-/);
+                                    if (match) {
+                                        setSelectedItemIndex(parseInt(match[1], 10));
+                                    }
+                                }}
+                            />
+                        </div>
+                    )}
                 </div>
 
                 {/* Footer */}
@@ -254,3 +458,4 @@ export default function DemoPage() {
         </main>
     );
 }
+
