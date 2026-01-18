@@ -347,17 +347,34 @@ export class ExtractionPipeline {
     /**
      * Helper: Global Content Deduplication
      * 
-     * Uses a heuristic to identify duplicate items across different pages.
+     * Uses a multi-pass strategy to identify duplicate items:
+     * 1. **Pass 1 (Evidence-based)**: If items have `evidence` spans, use the
+     *    source text for comparison. This is the most precise method because
+     *    it uses the exact text from the document.
+     * 2. **Pass 2 (Description-based)**: Fallback to comparing by `description`
+     *    field (normalized to lowercase).
+     * 3. **Pass 3 (Full JSON)**: Final fallback for items without known fields.
      */
     private deduplicateItems<T>(items: T[]): T[] {
         const seen = new Set<string>();
         const deduplicated: T[] = [];
 
         for (const item of items) {
-            const key =
-                typeof (item as any).description === "string"
-                    ? (item as any).description.toLowerCase().trim()
-                    : JSON.stringify(item);
+            let key: string;
+
+            // Pass 1: Use evidence span text if available (highest precision)
+            const evidence = (item as any).evidence;
+            if (evidence?.descriptionSpan?.text) {
+                key = `evidence:${evidence.descriptionSpan.text.trim()}`;
+            }
+            // Pass 2: Use description field if available
+            else if (typeof (item as any).description === "string") {
+                key = `desc:${(item as any).description.toLowerCase().trim()}`;
+            }
+            // Pass 3: Fallback to full JSON comparison
+            else {
+                key = `json:${JSON.stringify(item)}`;
+            }
 
             if (!seen.has(key)) {
                 seen.add(key);
