@@ -96,3 +96,15 @@ export {
     type LogLevel,
     type LoggerConfig,
 } from "./logger";
+
+// ============================================================================
+// GROUNDING UTILITIES
+// ============================================================================
+
+export {
+    computeEvidenceOffsets,
+    computeMultipleOffsets,
+    processRawEvidence,
+    type RawEvidenceSpan,
+} from "./grounding";
+

@@ -84,10 +84,32 @@ Benefits:
 - Home office stipend`,
 };
 
+interface RawEvidenceSpan {
+    text: string;
+}
+
 interface EvidenceSpan {
     text: string;
     startOffset: number;
     endOffset: number;
+}
+
+/**
+ * Compute offsets for an evidence span using string matching.
+ * This is more reliable than asking the LLM to compute offsets.
+ */
+function computeEvidenceOffsets(
+    sourceText: string,
+    evidenceText: string
+): EvidenceSpan | null {
+    if (!evidenceText) return null;
+    const startOffset = sourceText.indexOf(evidenceText);
+    if (startOffset === -1) return null;
+    return {
+        text: evidenceText,
+        startOffset,
+        endOffset: startOffset + evidenceText.length,
+    };
 }
 
 interface ExtractedItem {
@@ -95,8 +117,8 @@ interface ExtractedItem {
     total?: number;
     confidence?: number;
     evidence?: {
-        descriptionSpan?: EvidenceSpan;
-        totalSpan?: EvidenceSpan;
+        descriptionSpan?: RawEvidenceSpan;
+        totalSpan?: RawEvidenceSpan;
     };
     [key: string]: unknown;
 }
@@ -174,22 +196,29 @@ export default function DemoPage() {
             const color = colors[index % colors.length];
             const evidence = item.evidence;
 
-            if (evidence?.descriptionSpan) {
-                allHighlights.push({
-                    id: `item-${index}-desc`,
-                    span: evidence.descriptionSpan,
-                    color,
-                    label: `Item ${index + 1}: ${item.description || "Description"}`,
-                });
+            // Compute offsets client-side from evidence text
+            if (evidence?.descriptionSpan?.text) {
+                const span = computeEvidenceOffsets(inputText, evidence.descriptionSpan.text);
+                if (span) {
+                    allHighlights.push({
+                        id: `item-${index}-desc`,
+                        span,
+                        color,
+                        label: `Item ${index + 1}: ${item.description || "Description"}`,
+                    });
+                }
             }
 
-            if (evidence?.totalSpan) {
-                allHighlights.push({
-                    id: `item-${index}-total`,
-                    span: evidence.totalSpan,
-                    color,
-                    label: `Item ${index + 1}: $${item.total}`,
-                });
+            if (evidence?.totalSpan?.text) {
+                const span = computeEvidenceOffsets(inputText, evidence.totalSpan.text);
+                if (span) {
+                    allHighlights.push({
+                        id: `item-${index}-total`,
+                        span,
+                        color,
+                        label: `Item ${index + 1}: $${item.total}`,
+                    });
+                }
             }
         });
 
@@ -339,8 +368,8 @@ export default function DemoPage() {
                                                 key={index}
                                                 onClick={() => setSelectedItemIndex(index)}
                                                 className={`p-3 rounded-md border cursor-pointer transition-colors ${selectedItemIndex === index
-                                                        ? "border-blue-500 bg-blue-50"
-                                                        : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                                                    ? "border-blue-500 bg-blue-50"
+                                                    : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
                                                     }`}
                                             >
                                                 <div className="flex justify-between items-start">

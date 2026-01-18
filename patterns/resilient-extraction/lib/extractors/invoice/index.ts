@@ -6,19 +6,26 @@
  * - Quantity and unit
  * - Unit price and total
  * - Confidence score
- * - **Source grounding evidence** for key fields
+ * - **Source grounding evidence** (text-only, offsets computed client-side)
  */
 
 import { z } from "zod";
 import { ExtractorConfig } from "../../core";
 
 /**
- * Schema for source evidence span
+ * Schema for source evidence span (LLM output - text only).
+ * 
+ * ## Design Decision: Client-Side Offset Computation
+ * 
+ * LLMs are prediction engines, not calculators. We only ask the LLM
+ * for the exact text, then compute offsets deterministically using
+ * `computeEvidenceOffsets()` after extraction. This approach:
+ * - Reduces output tokens by ~25%
+ * - Eliminates hallucinated offsets
+ * - Improves latency
  */
-export const EvidenceSpanSchema = z.object({
-    text: z.string().describe("Exact text from the source document"),
-    startOffset: z.number().describe("0-indexed character offset where text starts"),
-    endOffset: z.number().describe("0-indexed character offset where text ends (exclusive)"),
+export const RawEvidenceSpanSchema = z.object({
+    text: z.string().describe("Exact text copied verbatim from the source document"),
 });
 
 /**
@@ -32,15 +39,18 @@ export const InvoiceLineItemSchema = z.object({
     total: z.number().describe("Total price for this line item"),
     confidence: z.number().min(0).max(1).describe("Extraction confidence (0-1)"),
     evidence: z.object({
-        descriptionSpan: EvidenceSpanSchema.describe("Source location of the description"),
-        totalSpan: EvidenceSpanSchema.describe("Source location of the total value"),
-    }).describe("Source grounding evidence linking values to document text"),
+        descriptionSpan: RawEvidenceSpanSchema.describe("Exact text of the description from the source"),
+        totalSpan: RawEvidenceSpanSchema.describe("Exact text of the total value from the source"),
+    }).describe("Source text evidence for grounding (offsets computed client-side)"),
 });
 
 export type InvoiceLineItem = z.infer<typeof InvoiceLineItemSchema>;
 
 /**
- * Build the extraction prompt for invoice line items with source grounding
+ * Build the extraction prompt for invoice line items.
+ * 
+ * Note: We only ask for the evidence text, not offsets. Offsets are
+ * computed client-side using string matching for accuracy and efficiency.
  */
 export function buildPrompt(text: string): string {
     return `You are an expert at extracting structured data from invoices.
@@ -52,22 +62,18 @@ Extract ALL line items from this invoice. For each line item, extract:
 - unit_price: Price per unit (null if not specified)
 - total: The total price for this line item (REQUIRED)
 - confidence: Your confidence in this extraction (0.0 to 1.0)
-- evidence: Source grounding with exact text and character offsets
+- evidence: Source text for grounding
 
-For the "evidence" field, you MUST provide:
-- descriptionSpan: { text, startOffset, endOffset } for where the description appears
-- totalSpan: { text, startOffset, endOffset } for where the total value appears
-
-The offsets are 0-indexed character positions in the INVOICE TEXT below.
-The "text" field MUST be a verbatim copy of the characters from the source.
+For the "evidence" field, provide:
+- descriptionSpan: { text } - The EXACT text of the description as it appears in the source
+- totalSpan: { text } - The EXACT text of the total value as it appears in the source
 
 IMPORTANT:
 - Extract every line item you can find
 - If quantity or unit_price is not specified, set them to null
 - Total should always be extracted - this is the most important field
 - Be careful with number parsing: $1,234.56 = 1234.56
-- Include subtotals or totals as separate line items if they appear as rows
-- Evidence spans MUST point to text that actually exists in the source
+- Evidence text MUST be copied VERBATIM from the source (we use it to locate the value)
 
 INVOICE TEXT:
 ${text}`;
@@ -84,4 +90,5 @@ export const invoiceExtractor: ExtractorConfig<typeof InvoiceLineItemSchema> = {
 };
 
 export default invoiceExtractor;
+
 

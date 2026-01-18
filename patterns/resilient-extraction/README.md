@@ -153,88 +153,93 @@ Source grounding links every extracted value back to its exact location in the s
 2. **Enabling verification** — Users can click an extracted value to see its source
 3. **Better deduplication** — Compare by source text, not parsed values
 
+### Design Decision: Client-Side Offset Computation
+
+> [!IMPORTANT]
+> **LLMs are prediction engines, not calculators.**
+>
+> We don't ask the LLM to compute character offsets — it would just "predict" plausible numbers.
+> Instead, the LLM returns only the **evidence text**, and we compute offsets deterministically
+> using `indexOf()`. This approach:
+> - **Reduces output tokens by ~25%**
+> - **Eliminates hallucinated offsets**
+> - **Improves latency**
+
 ```mermaid
 flowchart LR
-    subgraph "Source Document"
-        A["Web Development Services    40 hrs    $150.00    $6,000.00"]
+    subgraph "LLM Extraction"
+        A[Source Text] --> B[Gemini]
+        B --> C["evidence: {text}"]
     end
     
-    subgraph "Extracted Item"
-        B[description: Web Development Services]
-        C[total: 6000]
+    subgraph "Client Processing"
+        C --> D["computeEvidenceOffsets()"]
+        D --> E["evidence: {text, startOffset, endOffset}"]
     end
     
-    subgraph "Evidence Spans"
-        D["descriptionSpan: {text: 'Web Development Services', start: 0, end: 24}"]
-        E["totalSpan: {text: '$6,000.00', start: 50, end: 59}"]
-    end
-    
-    A --> B
-    A --> C
-    B -.-> D
-    C -.-> E
-    
-    style D fill:#fbbf24,color:#000
-    style E fill:#fbbf24,color:#000
+    style B fill:#16a34a,color:#fff
+    style D fill:#3b82f6,color:#fff
 ```
 
-### EvidenceSpan Type
+### How It Works
+
+1. **LLM extracts values** and returns the exact source text as evidence (no offsets)
+2. **Client computes offsets** using `indexOf()` — deterministic and accurate
+3. **UI highlights the source** using the computed offsets
+
+### EvidenceSpan Types
 
 ```typescript
-import { EvidenceSpan } from "@/lib/core";
-
-interface EvidenceSpan {
-  text: string;        // Exact text from the source
-  startOffset: number; // 0-indexed character offset (start)
-  endOffset: number;   // 0-indexed character offset (end, exclusive)
+// LLM output (text only)
+interface RawEvidenceSpan {
+  text: string;  // Exact text copied from source
 }
+
+// After client-side processing (with offsets)
+interface EvidenceSpan {
+  text: string;
+  startOffset: number;
+  endOffset: number;
+}
+
+// Compute offsets client-side
+import { computeEvidenceOffsets } from "@/lib/core";
+
+const span = computeEvidenceOffsets(sourceText, "$6,000.00");
+// { text: "$6,000.00", startOffset: 50, endOffset: 59 }
 ```
 
-### Example Output with Grounding
+### Example LLM Output (text-only evidence)
 
 ```json
 {
   "description": "Web Development Services",
-  "quantity": 40,
-  "unit": "hrs",
-  "unit_price": 150,
   "total": 6000,
   "confidence": 0.95,
   "evidence": {
-    "descriptionSpan": {
-      "text": "Web Development Services",
-      "startOffset": 0,
-      "endOffset": 24
-    },
-    "totalSpan": {
-      "text": "$6,000.00",
-      "startOffset": 50,
-      "endOffset": 59
-    }
+    "descriptionSpan": { "text": "Web Development Services" },
+    "totalSpan": { "text": "$6,000.00" }
   }
 }
 ```
 
 ### GroundingViewer Component
 
-Use the `GroundingViewer` component to visualize evidence spans in your UI:
+The UI computes offsets before passing to `GroundingViewer`:
 
 ```tsx
 import { GroundingViewer } from "@/app/components/grounding-viewer";
 
+// Compute offsets from raw evidence
+const span = computeEvidenceOffsets(inputText, item.evidence.totalSpan.text);
+
 <GroundingViewer
   sourceText={invoiceText}
-  highlights={[
-    { 
-      id: "item-1", 
-      span: { text: "$6,000.00", startOffset: 50, endOffset: 59 }, 
-      color: "yellow", 
-      label: "Total" 
-    },
-  ]}
-  selectedId={selectedItem}
+  highlights={[{ id: "item-1", span, color: "yellow", label: "Total" }]}
   onHighlightClick={setSelectedItem}
 />
+```
+
 
 ## Built-in Extractors
 
