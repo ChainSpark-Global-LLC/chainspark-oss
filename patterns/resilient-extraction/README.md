@@ -23,7 +23,7 @@ graph TB
         A[Document Text] --> B[Page Chunker]
     end
     
-    subgraph Core Framework (High performance)
+    subgraph "Core Framework (High performance)"
         B --> C[Extraction Pipeline]
         C --> D[Concurrency Scheduler]
         D --> E[LLM API]
