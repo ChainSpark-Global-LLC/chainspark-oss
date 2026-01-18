@@ -15,7 +15,7 @@ When extracting structured data from documents using LLMs, you'll encounter:
 
 ---
 
-## Architecture Overview
+## Architecture Overview (with Concurrency)
 
 ```mermaid
 graph TB
@@ -23,56 +23,55 @@ graph TB
         A[Document Text] --> B[Page Chunker]
     end
     
-    subgraph Core Framework
+    subgraph "Core Framework (High performance)"
         B --> C[Extraction Pipeline]
-        C --> D[Rate Limiter]
+        C --> D[Concurrency Scheduler]
         D --> E[LLM API]
         E --> F[Zod Validation]
     end
     
     subgraph Output
         F --> G[Structured JSON]
+        C -.-> H[Result Streaming]
     end
     
     subgraph Extractors
-        H[Invoice] -.-> C
-        I[Recipe] -.-> C
-        J[Job Posting] -.-> C
-        K[Your Custom] -.-> C
+        I[Invoice] -.-> C
+        J[Recipe] -.-> C
+        K[Job Posting] -.-> C
+        L[Your Custom] -.-> C
     end
     
     style C fill:#4f46e5,color:#fff
+    style D fill:#fbbf24,color:#000
     style F fill:#16a34a,color:#fff
 ```
 
 ---
 
-## Extraction Flow
+## Extraction Flow (Parallel & Streaming)
 
 ```mermaid
 sequenceDiagram
     participant Client
-    participant API as /api/extract/[type]
     participant Pipeline as Extraction Pipeline
-    participant RateLimiter
+    participant Limiter as Concurrency Limiter
     participant LLM as Gemini API
-    participant Zod
     
-    Client->>API: POST { text: "..." }
-    API->>Pipeline: extractFromPages(chunks, extractor)
+    Client->>Pipeline: extractStreaming(chunks, extractor)
     
-    loop For each page
-        Pipeline->>RateLimiter: waitForNextSlot()
-        RateLimiter-->>Pipeline: OK (after delay)
-        Pipeline->>LLM: generateObject(prompt, schema)
-        LLM-->>Zod: Raw response
-        Zod-->>Pipeline: Validated items[]
-        Note over Pipeline: Continue even if page fails
+    par Parallel Execution (up to maxConcurrent)
+        Pipeline->>Limiter: Reserve Slot
+        Limiter->>LLM: generateObject(page 1)
+        Pipeline->>Limiter: Reserve Slot (wait delayMs)
+        Limiter->>LLM: generateObject(page 2)
     end
     
-    Pipeline->>Pipeline: Deduplicate items
-    Pipeline-->>API: ExtractionResult
-    API-->>Client: { items, metrics }
+    Note over Pipeline: Yield results as they finish
+    LLM-->>Pipeline: Page 2 Done
+    Pipeline-->>Client: Yield Result 2
+    LLM-->>Pipeline: Page 1 Done
+    Pipeline-->>Client: Yield Result 1
 ```
 
 ---
@@ -124,13 +123,22 @@ const pipeline = createPipeline();
 const result = await pipeline.extractFromPages(chunks, myExtractor);
 ```
 
+### Optimization Patterns
+
+| Method | Best For | Description |
+| :--- | :--- | :--- |
+| `extractFromPages` | Simplicity | Sequential processing with standard rate limiting. |
+| `extractParallel` | **Performance** | Processes all pages concurrently while respecting RPM. |
+| `extractStreaming` | **UX Latency** | Yields results instantly as they arrive from the LLM. |
+
 ### Key Features
 
 | Feature | Description |
 |---------|-------------|
-| **Page-by-Page Processing** | Processes large documents in chunks |
+| **Parallel Processing** | Processes multiple pages concurrently to save time |
+| **Result Streaming** | Uses AsyncGenerators to show data to users instantly |
+| **Slot-based Limits** | Concurrency-aware rate limiter for Gemini 2.5 Flash |
 | **Structured Output** | Uses `generateObject` + Zod for guaranteed valid JSON |
-| **Rate Limiting** | Automatic delays with exponential backoff |
 | **Error Isolation** | One page fails, the rest continue |
 | **Deduplication** | Removes duplicate items automatically |
 
@@ -242,18 +250,20 @@ ai-extraction-patterns/
 
 ---
 
-## Rate Limiting Strategy
+## Concurrency & Slot Strategy
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Ready
-    Ready --> Waiting: Request received
-    Waiting --> Calling: Delay elapsed (7s default)
-    Calling --> Success: 200 OK
-    Calling --> RateLimited: 429 Error
+    [*] --> SlotAvailable
+    SlotAvailable --> Waiting: Request received
+    Waiting --> InFlight: Concurrency slot reserved
+    InFlight --> WaitingForTime: Slot limit reached
+    WaitingForTime --> InFlight: delayMs elapsed
+    InFlight --> Success: 200 OK
+    InFlight --> RateLimited: 429 Error
     RateLimited --> Backoff: Exponential wait
-    Backoff --> Calling: Retry
-    Success --> Ready
+    Backoff --> InFlight: Retry
+    Success --> SlotAvailable
     Backoff --> Failed: Max retries exceeded
 ```
 

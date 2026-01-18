@@ -8,27 +8,34 @@ Each pattern here is designed to be **self-contained**, **educational**, and **c
 
 ## 🏛️ Architecture Patterns
 
-### 1. Page-by-Page Orchestration
-**The Problem**: LLMs have limited context windows and accuracy degrades with large inputs.
-**The Solution**: Process documents in discrete chunks (pages) and aggregate the results.
-*   **Where**: [extraction-pipeline.ts](../../lib/core/extraction-pipeline.ts)
-*   **Benefits**: High accuracy, context safety, progress feedback.
+### 1. Parallel Page Processing
+**The Problem**: Processing large documents page-by-page sequentially is slow.
+**The Solution**: Process multiple pages concurrently using a concurrency-aware rate limiter.
+*   **Where**: [extraction-pipeline.ts](../../lib/core/extraction-pipeline.ts#L251)
+*   **Guide**: [Latency Optimization](./latency-optimization.md)
+*   **Benefits**: Drastically reduced wall-clock time for large documents.
 
-### 2. Error Isolation (Resonant Failures)
+### 2. Result Streaming (Real-time UX)
+**The Problem**: Users have to wait for the entire document to finish before seeing any data.
+**The Solution**: Yield extraction results as soon as individual pages finish via an AsyncGenerator.
+*   **Where**: [extraction-pipeline.ts](../../lib/core/extraction-pipeline.ts#L340)
+*   **Benefits**: Instant user feedback, reduced perceived latency.
+
+### 3. Error Isolation (Resonant Failures)
 **The Problem**: One bad page with messy OCR or weird formatting can crash an entire extraction job.
 **The Solution**: Wrap each page call in a try/catch. Log the error but continue to the next page.
-*   **Where**: [extraction-pipeline.ts](../../lib/core/extraction-pipeline.ts#L182-196)
+*   **Where**: [extraction-pipeline.ts](../../lib/core/extraction-pipeline.ts#L202)
 *   **Benefits**: Partial success is better than total failure for large batch jobs.
 
 ---
 
 ## 🚦 Reliability Patterns
 
-### 3. Smart Rate Limiting (Token Bucket)
+### Smart Rate Limiting (Concurrency-Aware)
 **The Problem**: AI APIs (Gemini, OpenAI, Anthropic) enforce strict Rate Limits (RPM/TPM).
-**The Solution**: A non-blocking queue that enforces a minimum delay between calls, even when the previous call finishes instantly.
+**The Solution**: A slot-based scheduler that manages multiple in-flight calls while enforcing a minimum start delay between them.
 *   **Where**: [rate-limiter.ts](../../lib/core/rate-limiter.ts)
-*   **Benefits**: Prevents 429 errors before they happen.
+*   **Benefits**: Maximum throughput without triggering 429 errors.
 
 ### 4. Exponential Backoff
 **The Problem**: Fixed-time retries often hit the rate limit again immediately.
