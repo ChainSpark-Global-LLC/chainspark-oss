@@ -145,11 +145,102 @@ const result = await pipeline.extractFromPages(chunks, myExtractor);
 
 ---
 
+## Source Grounding
+
+Source grounding links every extracted value back to its exact location in the source document. This improves precision by:
+
+1. **Reducing hallucinations** — The LLM must prove where the data came from
+2. **Enabling verification** — Users can click an extracted value to see its source
+3. **Better deduplication** — Compare by source text, not parsed values
+
+```mermaid
+flowchart LR
+    subgraph "Source Document"
+        A["Web Development Services    40 hrs    $150.00    $6,000.00"]
+    end
+    
+    subgraph "Extracted Item"
+        B[description: Web Development Services]
+        C[total: 6000]
+    end
+    
+    subgraph "Evidence Spans"
+        D["descriptionSpan: {text: 'Web Development Services', start: 0, end: 24}"]
+        E["totalSpan: {text: '$6,000.00', start: 50, end: 59}"]
+    end
+    
+    A --> B
+    A --> C
+    B -.-> D
+    C -.-> E
+    
+    style D fill:#fbbf24,color:#000
+    style E fill:#fbbf24,color:#000
+```
+
+### EvidenceSpan Type
+
+```typescript
+import { EvidenceSpan } from "@/lib/core";
+
+interface EvidenceSpan {
+  text: string;        // Exact text from the source
+  startOffset: number; // 0-indexed character offset (start)
+  endOffset: number;   // 0-indexed character offset (end, exclusive)
+}
+```
+
+### Example Output with Grounding
+
+```json
+{
+  "description": "Web Development Services",
+  "quantity": 40,
+  "unit": "hrs",
+  "unit_price": 150,
+  "total": 6000,
+  "confidence": 0.95,
+  "evidence": {
+    "descriptionSpan": {
+      "text": "Web Development Services",
+      "startOffset": 0,
+      "endOffset": 24
+    },
+    "totalSpan": {
+      "text": "$6,000.00",
+      "startOffset": 50,
+      "endOffset": 59
+    }
+  }
+}
+```
+
+### GroundingViewer Component
+
+Use the `GroundingViewer` component to visualize evidence spans in your UI:
+
+```tsx
+import { GroundingViewer } from "@/app/components/grounding-viewer";
+
+<GroundingViewer
+  sourceText={invoiceText}
+  highlights={[
+    { 
+      id: "item-1", 
+      span: { text: "$6,000.00", startOffset: 50, endOffset: 59 }, 
+      color: "yellow", 
+      label: "Total" 
+    },
+  ]}
+  selectedId={selectedItem}
+  onHighlightClick={setSelectedItem}
+/>
+
 ## Built-in Extractors
 
 | Extractor | Use Case | Fields Extracted |
 |-----------|----------|------------------|
-| 📄 **Invoice** | Financial documents | description, quantity, unit_price, total |
+| 📄 **Invoice** | Financial documents | description, quantity, unit_price, total, **evidence** |
 | 🍳 **Recipe** | Cooking blogs | ingredients, steps, prep_time, cook_time |
 | 💼 **Job Posting** | Career sites | title, company, requirements, salary, benefits |
 
