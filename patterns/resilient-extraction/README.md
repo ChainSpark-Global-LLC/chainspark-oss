@@ -135,12 +135,13 @@ const result = await pipeline.extractFromPages(chunks, myExtractor);
 
 | Feature | Description |
 |---------|-------------|
+| **Source Grounding** | Links extracted values to exact character offsets in source text |
 | **Parallel Processing** | Processes multiple pages concurrently to save time |
 | **Result Streaming** | Uses AsyncGenerators to show data to users instantly |
 | **Slot-based Limits** | Concurrency-aware rate limiter for Gemini 2.5 Flash |
 | **Structured Output** | Uses `generateObject` + Zod for guaranteed valid JSON |
 | **Error Isolation** | One page fails, the rest continue |
-| **Deduplication** | Removes duplicate items automatically |
+| **Evidence-based Deduplication** | Removes duplicates using source text, not just parsed values |
 
 ---
 

@@ -35,6 +35,7 @@ export type {
     ExtractionResult,
     ExtractionMetrics,
     ExtractedItem,
+    EvidenceSpan,
 } from "./types";
 
 export { DEFAULT_RATE_LIMIT } from "./types";

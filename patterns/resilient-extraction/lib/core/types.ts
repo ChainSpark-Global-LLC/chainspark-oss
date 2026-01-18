@@ -21,6 +21,39 @@
 import { ZodTypeAny } from "zod";
 
 // ============================================================================
+// SOURCE GROUNDING
+// ============================================================================
+
+/**
+ * A text span linking an extracted value to its source.
+ * 
+ * ## Why Grounding?
+ * 
+ * LLMs can "hallucinate" values that don't exist in the source text.
+ * By requiring the model to return evidence spans, we can:
+ * 1. Verify that extracted values actually appear in the document
+ * 2. Show users exactly where data came from for auditing
+ * 3. Improve deduplication by comparing source text, not just values
+ * 
+ * @example
+ * ```typescript
+ * const evidence: EvidenceSpan = {
+ *   text: "$6,000.00",
+ *   startOffset: 342,
+ *   endOffset: 351,
+ * };
+ * ```
+ */
+export interface EvidenceSpan {
+    /** Exact text found in the source document. */
+    text: string;
+    /** 0-indexed character offset where `text` starts. */
+    startOffset: number;
+    /** 0-indexed character offset where `text` ends (exclusive). */
+    endOffset: number;
+}
+
+// ============================================================================
 // EXTRACTOR CONFIGURATION
 // ============================================================================
 
