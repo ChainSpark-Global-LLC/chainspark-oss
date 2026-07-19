@@ -10,6 +10,10 @@ This repository is organized into three main areas:
     - **Resilient AI Extraction**: A production-ready pipeline for page-by-page extraction from large documents. Features high-concurrency rate limiting, result streaming, and robust error handling.
         - [Explore Pattern](patterns/resilient-extraction/README.md)
         - [Latency Optimization Guide](patterns/resilient-extraction/docs/patterns/latency-optimization.md)
+    - **Agent Authority Model**: A four-tier model for grading agent autonomy by what the action risks, plus a charter template for declaring an agent's write surfaces.
+        - [Explore Pattern](patterns/agent-authority-model/README.md)
+    - **Write Guard Hook**: A config-driven `PreToolUse` hook for Claude Code that blocks agent writes to protected paths.
+        - [Explore Pattern](patterns/write-guard-hook/README.md)
 - **[snippets/](./snippets/)**: Bite-sized code utility fragments and prompt engineering tricks.
 - **[examples/](./patterns/resilient-extraction/examples/)**: Minimal demos to help you get started quickly.
 
@@ -21,6 +25,16 @@ This repository is organized into three main areas:
 **Status**: `Production-Ready` | **Complexity**: `High`
 A robust orchestration framework for extracting structured data from large, multi-page documents (Invoices, Recipes, Job Postings) using Gemini 2.5 Flash and Vercel AI SDK. Handles rate limits, error isolation, and deduplication.
 👉 **[View Pattern](./patterns/resilient-extraction/)**
+
+### 2. Agent Authority Model
+**Status**: `v0.1` | **Complexity**: `Low`
+A four-tier model for grading how much autonomy an agent has, based on what the action actually risks rather than one approval gate for everything. Ships with a charter template for declaring an agent's autonomous, propose-only, and never-touch write surfaces. Grounded in published Gartner and Okta findings on approval fatigue.
+👉 **[View Pattern](./patterns/agent-authority-model/)**
+
+### 3. Write Guard Hook
+**Status**: `Production-Ready` | **Complexity**: `Low`
+A config-driven `PreToolUse` hook for Claude Code that blocks agent writes to protected paths — contracts, decision records, production infrastructure, secrets. Protected paths live in a config file, not the script. No dependencies beyond Python 3.8+.
+👉 **[View Pattern](./patterns/write-guard-hook/)**
 
 ---
 
