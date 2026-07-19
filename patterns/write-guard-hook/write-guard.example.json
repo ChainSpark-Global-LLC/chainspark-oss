@@ -1,0 +1,25 @@
+{
+  "mode": "block",
+  "protected": [
+    {
+      "pattern": "legal/",
+      "reason": "Contracts and legal instruments change only by human instruction."
+    },
+    {
+      "pattern": "docs/decision-register.md",
+      "reason": "The decision record is the audit trail. Agents propose; humans write."
+    },
+    {
+      "pattern": "infra/prod/**",
+      "reason": "Production infrastructure is human-applied."
+    },
+    {
+      "pattern": ".env*",
+      "reason": "Secrets never move through an agent."
+    },
+    "*.pem"
+  ],
+  "allow": [
+    "legal/README.md"
+  ]
+}
